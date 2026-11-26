@@ -4662,6 +4662,9 @@ int manager_set_unit_defaults(Manager *m, const UnitDefaults *defaults) {
 
         m->defaults.restrict_suid_sgid = defaults->restrict_suid_sgid;
 
+        m->defaults.wait_network_online = defaults->wait_network_online;
+        m->defaults.wait_user_lookup = defaults->wait_user_lookup;
+
         m->defaults.start_limit = defaults->start_limit;
 
         m->defaults.memory_accounting = defaults->memory_accounting;

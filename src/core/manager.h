@@ -170,6 +170,9 @@ typedef struct UnitDefaults {
 
         bool restrict_suid_sgid;
 
+        bool wait_network_online;
+        bool wait_user_lookup;
+
         OOMPolicy oom_policy;
         int oom_score_adjust;
         bool oom_score_adjust_set;

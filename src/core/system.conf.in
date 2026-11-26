@@ -87,6 +87,8 @@
 #DefaultOOMPolicy=stop
 #DefaultSmackProcessLabel=
 #DefaultRestrictSUIDSGID=
+#DefaultWaitNetworkOnline=no
+#DefaultWaitUserLookup=no
 #ReloadLimitIntervalSec=
 #ReloadLimitBurst=
 #EventLoopRateLimitIntervalSec=1s

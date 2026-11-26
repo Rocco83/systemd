@@ -788,6 +788,62 @@
   </refsect1>
 
   <refsect1>
+    <title>Network Synchronization</title>
+
+    <para>Many daemons bind to specific IP addresses, or resolve host, user or group names provided by the
+    network when they start. Unless they are written to cope with network configuration that is applied
+    later, they fail when started at boot before the network is configured, see
+    <ulink url="https://systemd.io/NETWORK_ONLINE">Network Configuration Synchronization Points</ulink>.
+    The following options change the defaults for all units, so that this does not have to be addressed for
+    each unit individually. They are useful on servers in particular, and may be enabled together with a
+    drop-in such as <filename>/etc/systemd/system.conf.d/server.conf</filename>:</para>
+
+    <programlisting>[Manager]
+DefaultWaitNetworkOnline=yes
+DefaultWaitUserLookup=yes</programlisting>
+
+    <variablelist class='config-directives'>
+      <varlistentry>
+        <term><varname>DefaultWaitNetworkOnline=</varname></term>
+
+        <listitem><para>Takes a boolean argument. If enabled, every service unit that has default
+        dependencies enabled (see <varname>DefaultDependencies=</varname> in
+        <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>)
+        and is ordered after <filename>network.target</filename> additionally gets
+        <varname>Wants=</varname> and <varname>After=</varname> dependencies on
+        <filename>network-online.target</filename>. Services that are themselves ordered before
+        <filename>network-online.target</filename>, such as the various
+        <filename>*-wait-online.service</filename> units, are not changed. Socket units are not changed either,
+        as they are started before the network is configured, use <varname>FreeBind=</varname> in
+        <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        for them instead.</para>
+
+        <para>Note that this delays the start of the affected services until the network is considered
+        online. Defaults to off. This setting is only used by the system manager.</para>
+
+        <xi:include href="version-info.xml" xpointer="v263"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>DefaultWaitUserLookup=</varname></term>
+
+        <listitem><para>Takes a boolean argument. If enabled, every service unit that has default
+        dependencies enabled and runs under a user or group specified by name (see <varname>User=</varname>,
+        <varname>Group=</varname> and <varname>SupplementaryGroups=</varname> in
+        <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry>)
+        is additionally ordered after <filename>nss-user-lookup.target</filename>, so that accounts provided
+        by network directory services (for example LDAP via <command>sssd</command>) can be resolved when the
+        service is started. Services running as root, under a numeric ID, with <varname>DynamicUser=</varname>,
+        or ordered before <filename>nss-user-lookup.target</filename> themselves are not changed. This is only
+        an ordering dependency; <filename>nss-user-lookup.target</filename> is pulled in by the NSS lookup
+        service, if one is installed. Defaults to off. This setting is only used by the system manager.</para>
+
+        <xi:include href="version-info.xml" xpointer="v263"/></listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
     <title>Environment</title>
 
     <variablelist class='config-directives'>

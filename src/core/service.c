@@ -63,6 +63,7 @@
 #include "transaction.h"
 #include "unit.h"
 #include "unit-name.h"
+#include "user-util.h"
 #include "utf8.h"
 
 #define STATUS_TEXT_MAX (16U*1024U)
@@ -1121,6 +1122,96 @@ static int service_verify(Service *s) {
         return 0;
 }
 
+static bool service_is_ordered_before(Service *s, const char *name) {
+        Unit *other;
+
+        assert(s);
+        assert(name);
+
+        other = manager_get_unit(UNIT(s)->manager, name);
+        return other && unit_has_dependency(UNIT(s), UNIT_ATOM_BEFORE, other);
+}
+
+static int service_add_network_online_dependencies(Service *s) {
+        Unit *u = UNIT(s);
+        Unit *network;
+
+        assert(s);
+
+        /* With DefaultWaitNetworkOnline=yes, every service that is ordered after network.target is
+         * additionally ordered after, and pulls in, network-online.target. This is what server setups want:
+         * daemons that bind to specific addresses or resolve host names at startup otherwise fail randomly
+         * during boot, and adding drop-ins to every single one of them by hand is error-prone.
+         *
+         * This is done for services only: socket units are ordered before sockets.target and hence
+         * basic.target, which the network management services are ordered after, so ordering them after
+         * network-online.target would always result in an ordering cycle. Use FreeBind= for those. */
+
+        if (!MANAGER_IS_SYSTEM(u->manager) || !u->manager->defaults.wait_network_online)
+                return 0;
+
+        network = manager_get_unit(u->manager, SPECIAL_NETWORK_TARGET);
+        if (!network || !unit_has_dependency(u, UNIT_ATOM_AFTER, network))
+                return 0;
+
+        /* Services which are part of reaching network-online.target (e.g. the *-wait-online services)
+         * would create an ordering cycle. */
+        if (service_is_ordered_before(s, SPECIAL_NETWORK_ONLINE_TARGET))
+                return 0;
+
+        return unit_add_two_dependencies_by_name(u, UNIT_WANTS, UNIT_AFTER, SPECIAL_NETWORK_ONLINE_TARGET,
+                                                 /* add_reference= */ true, UNIT_DEPENDENCY_DEFAULT);
+}
+
+static bool exec_context_needs_user_lookup(const ExecContext *c) {
+        assert(c);
+
+        /* Returns true if the user or group names configured for the service might only be resolvable once
+         * the NSS user/group lookup services (e.g. sssd for LDAP accounts) are up. Numeric IDs and root
+         * never need a lookup, DynamicUser= allocates its own user. Note that we cannot check whether a
+         * name is actually provided by a network directory, since PID 1 must not issue NSS requests itself,
+         * hence all names are treated the same. */
+
+        if (c->dynamic_user)
+                return false;
+
+        if (c->user && !streq(c->user, "root") && parse_uid(c->user, /* ret_uid= */ NULL) < 0)
+                return true;
+
+        if (c->group && !streq(c->group, "root") && parse_gid(c->group, /* ret_gid= */ NULL) < 0)
+                return true;
+
+        STRV_FOREACH(g, c->supplementary_groups)
+                if (!streq(*g, "root") && parse_gid(*g, /* ret_gid= */ NULL) < 0)
+                        return true;
+
+        return false;
+}
+
+static int service_add_user_lookup_dependencies(Service *s) {
+        Unit *u = UNIT(s);
+
+        assert(s);
+
+        /* With DefaultWaitUserLookup=yes, services which run under a named user or group are ordered after
+         * nss-user-lookup.target, so that accounts from network directories (LDAP, IPA, AD, …) can be
+         * resolved when the service is started. This is an ordering dependency only: the target is pulled in
+         * by the NSS lookup service, if there is one. */
+
+        if (!MANAGER_IS_SYSTEM(u->manager) || !u->manager->defaults.wait_user_lookup)
+                return 0;
+
+        if (!exec_context_needs_user_lookup(&s->exec_context))
+                return 0;
+
+        /* The NSS lookup services themselves (sssd, nslcd, …) are ordered before the target. */
+        if (service_is_ordered_before(s, SPECIAL_NSS_USER_LOOKUP_TARGET))
+                return 0;
+
+        return unit_add_dependency_by_name(u, UNIT_AFTER, SPECIAL_NSS_USER_LOOKUP_TARGET,
+                                           /* add_reference= */ true, UNIT_DEPENDENCY_DEFAULT);
+}
+
 static int service_add_default_dependencies(Service *s) {
         int r;
 
@@ -1158,7 +1249,17 @@ static int service_add_default_dependencies(Service *s) {
                 return r;
 
         /* Third, add us in for normal shutdown. */
-        return unit_add_two_dependencies_by_name(UNIT(s), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_SHUTDOWN_TARGET, /* add_reference= */ true, UNIT_DEPENDENCY_DEFAULT);
+        r = unit_add_two_dependencies_by_name(UNIT(s), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_SHUTDOWN_TARGET, /* add_reference= */ true, UNIT_DEPENDENCY_DEFAULT);
+        if (r < 0)
+                return r;
+
+        /* Finally, the optional "server" style dependencies on network-online.target and
+         * nss-user-lookup.target. */
+        r = service_add_network_online_dependencies(s);
+        if (r < 0)
+                return r;
+
+        return service_add_user_lookup_dependencies(s);
 }
 
 static void service_fix_stdio(Service *s) {

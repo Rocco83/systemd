@@ -111,7 +111,11 @@ static SD_VARLINK_DEFINE_STRUCT_TYPE(
                 SD_VARLINK_FIELD_COMMENT("Root of the control group hierarchy that the manager is running in"),
                 SD_VARLINK_DEFINE_FIELD(ControlGroup, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
                 SD_VARLINK_FIELD_COMMENT("https://www.freedesktop.org/software/systemd/man/"PROJECT_VERSION_STR"/systemd-system.conf.html#DefaultMemoryZSwapWriteback="),
-                SD_VARLINK_DEFINE_FIELD(DefaultMemoryZSwapWriteback, SD_VARLINK_BOOL, 0));
+                SD_VARLINK_DEFINE_FIELD(DefaultMemoryZSwapWriteback, SD_VARLINK_BOOL, 0),
+                SD_VARLINK_FIELD_COMMENT("https://www.freedesktop.org/software/systemd/man/"PROJECT_VERSION_STR"/systemd-system.conf.html#DefaultWaitNetworkOnline="),
+                SD_VARLINK_DEFINE_FIELD(DefaultWaitNetworkOnline, SD_VARLINK_BOOL, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("https://www.freedesktop.org/software/systemd/man/"PROJECT_VERSION_STR"/systemd-system.conf.html#DefaultWaitUserLookup="),
+                SD_VARLINK_DEFINE_FIELD(DefaultWaitUserLookup, SD_VARLINK_BOOL, SD_VARLINK_NULLABLE));
 
 static SD_VARLINK_DEFINE_STRUCT_TYPE(
                 ManagerRuntime,

@@ -219,6 +219,38 @@ be (re-)established, but is instead started when the network has connectivity,
 and if the network goes away, it fails and relies on the system manager to
 restart it if appropriate.
 
+## Making all network services wait for `network-online.target`
+
+The recommendations above are for developers. Administrators of servers often
+run daemons that bind to specific addresses or resolve host names at startup
+(for example `sshd` with `ListenAddress=`, or database servers listening on a
+specific address), and whose unit files only order them after
+`network.target`. Such daemons fail at boot when they are started before the
+network is configured. Instead of adding a drop-in to each of these services,
+the default can be changed for the whole system with a drop-in for
+[systemd-system.conf(5)](https://www.freedesktop.org/software/systemd/man/latest/systemd-system.conf.html),
+for example `/etc/systemd/system.conf.d/server.conf`:
+
+```ini
+[Manager]
+DefaultWaitNetworkOnline=yes
+DefaultWaitUserLookup=yes
+```
+
+With `DefaultWaitNetworkOnline=yes`, every service with default dependencies
+that is ordered after `network.target` also pulls in and is ordered after
+`network-online.target`. Services that are part of reaching
+`network-online.target` themselves (i.e. are ordered before it) are not
+changed. With `DefaultWaitUserLookup=yes`, services running under a user or
+group specified by name are also ordered after `nss-user-lookup.target`, so
+that accounts provided by LDAP or similar directory services can be resolved
+when they start.
+
+`DefaultWaitNetworkOnline=yes` delays the affected services until the network is
+online, and does not help with services that are not ordered after
+`network.target` at all. Socket units are started early during boot, and hence
+cannot be ordered after `network-online.target`, use `FreeBind=` for them.
+
 ## Modifying the meaning of `network-online.target`
 
 As described above, the meaning of this target is defined first by which
