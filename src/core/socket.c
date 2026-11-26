@@ -282,6 +282,56 @@ static int socket_add_device_dependencies(Socket *s) {
         return unit_add_node_dependency(UNIT(s), t, UNIT_BINDS_TO, UNIT_DEPENDENCY_FILE);
 }
 
+static bool socket_port_binds_to_specific_address(const SocketPort *p) {
+        const union in_addr_union *a;
+        int family;
+
+        assert(p);
+
+        /* Returns true if the port is an IP socket bound to a specific address, i.e. one which can only be
+         * bound once that address is configured on some network interface. */
+
+        if (p->type != SOCKET_SOCKET)
+                return false;
+
+        family = socket_address_family(&p->address);
+        if (!IN_SET(family, AF_INET, AF_INET6))
+                return false;
+
+        a = ASSERT_PTR(sockaddr_in_addr(&p->address.sockaddr.sa));
+
+        return in_addr_is_null(family, a) <= 0 && in_addr_is_localhost(family, a) <= 0;
+}
+
+static bool socket_needs_network_online(Socket *s) {
+        Unit *u = UNIT(ASSERT_PTR(s));
+        Unit *other;
+
+        /* With DefaultWaitNetworkOnline=yes, socket units that bind to specific IP addresses wait for
+         * network-online.target, like services ordered after network.target do. Sockets bound to wildcard or
+         * loopback addresses, AF_UNIX sockets and so on are not affected, so that early boot is unchanged
+         * for them. */
+
+        if (!MANAGER_IS_SYSTEM(u->manager) || !u->manager->defaults.wait_network_online)
+                return false;
+
+        /* Sockets that are explicitly ordered before sockets.target or network-online.target would create
+         * an ordering cycle. */
+        other = manager_get_unit(u->manager, SPECIAL_SOCKETS_TARGET);
+        if (other && unit_has_dependency(u, UNIT_ATOM_BEFORE, other))
+                return false;
+
+        other = manager_get_unit(u->manager, SPECIAL_NETWORK_ONLINE_TARGET);
+        if (other && unit_has_dependency(u, UNIT_ATOM_BEFORE, other))
+                return false;
+
+        LIST_FOREACH(port, p, s->ports)
+                if (socket_port_binds_to_specific_address(p))
+                        return true;
+
+        return false;
+}
+
 static int socket_add_default_dependencies(Socket *s) {
         int r;
 
@@ -290,7 +340,20 @@ static int socket_add_default_dependencies(Socket *s) {
         if (!UNIT(s)->default_dependencies)
                 return 0;
 
-        r = unit_add_dependency_by_name(UNIT(s), UNIT_BEFORE, SPECIAL_SOCKETS_TARGET, /* add_reference= */ true, UNIT_DEPENDENCY_DEFAULT);
+        if (socket_needs_network_online(s)) {
+                /* Order the socket after sockets.target rather than before it: sockets.target is ordered
+                 * before basic.target, and the network management services are ordered after it, hence
+                 * ordering the socket after network-online.target and before sockets.target would be a
+                 * cycle. Being ordered after sockets.target explicitly also ensures that sockets.target
+                 * does not get ordered after the socket implicitly when it pulls the socket in (see
+                 * unit_add_default_target_dependency()), which would result in the same cycle. */
+                r = unit_add_dependency_by_name(UNIT(s), UNIT_AFTER, SPECIAL_SOCKETS_TARGET, /* add_reference= */ true, UNIT_DEPENDENCY_DEFAULT);
+                if (r < 0)
+                        return r;
+
+                r = unit_add_two_dependencies_by_name(UNIT(s), UNIT_WANTS, UNIT_AFTER, SPECIAL_NETWORK_ONLINE_TARGET, /* add_reference= */ true, UNIT_DEPENDENCY_DEFAULT);
+        } else
+                r = unit_add_dependency_by_name(UNIT(s), UNIT_BEFORE, SPECIAL_SOCKETS_TARGET, /* add_reference= */ true, UNIT_DEPENDENCY_DEFAULT);
         if (r < 0)
                 return r;
 

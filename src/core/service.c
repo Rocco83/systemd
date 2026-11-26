@@ -1141,11 +1141,8 @@ static int service_add_network_online_dependencies(Service *s) {
         /* With DefaultWaitNetworkOnline=yes, every service that is ordered after network.target is
          * additionally ordered after, and pulls in, network-online.target. This is what server setups want:
          * daemons that bind to specific addresses or resolve host names at startup otherwise fail randomly
-         * during boot, and adding drop-ins to every single one of them by hand is error-prone.
-         *
-         * This is done for services only: socket units are ordered before sockets.target and hence
-         * basic.target, which the network management services are ordered after, so ordering them after
-         * network-online.target would always result in an ordering cycle. Use FreeBind= for those. */
+         * during boot, and adding drop-ins to every single one of them by hand is error-prone. Socket
+         * units are handled separately, see socket_needs_network_online(). */
 
         if (!MANAGER_IS_SYSTEM(u->manager) || !u->manager->defaults.wait_network_online)
                 return 0;

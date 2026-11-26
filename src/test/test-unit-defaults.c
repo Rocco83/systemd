@@ -4,6 +4,7 @@
 #include "manager.h"
 #include "path-util.h"
 #include "rm-rf.h"
+#include "socket-util.h"
 #include "special.h"
 #include "tests.h"
 #include "tmpfile-util.h"
@@ -13,8 +14,15 @@ static const struct {
         const char *name;
         const char *contents;
 } units[] = {
+        /* A minimal version of the boot sequence: a network management service that is ordered after
+         * basic.target (by default dependencies) and before network-online.target, and sockets.target
+         * pulling in socket units, like [Install] WantedBy=sockets.target does. */
+        { "boot.target",            "[Unit]\nRequires=basic.target\nAfter=basic.target\nWants=network-online.target\n" },
+        { "basic.target",           "[Unit]\nRequires=sockets.target\nAfter=sockets.target\n" },
+        { "sockets.target",         "[Unit]\nWants=ip.socket ip6.socket wildcard.socket loopback.socket unix.socket\n" },
         { "network.target",         "[Unit]\n" },
-        { "network-online.target",  "[Unit]\nAfter=network.target\n" },
+        { "network-online.target",  "[Unit]\nAfter=network.target\nWants=netmgr.service\n" },
+        { "netmgr.service",         "[Unit]\nBefore=network.target network-online.target\n[Service]\nExecStart=/bin/true\n" },
         { "nss-user-lookup.target", "[Unit]\n" },
 
         { "server.service",      "[Unit]\nAfter=network.target\n[Service]\nExecStart=/bin/true\n" },
@@ -29,8 +37,13 @@ static const struct {
         { "dynamic.service",     "[Service]\nDynamicUser=yes\nUser=dyn\nExecStart=/bin/true\n" },
         { "lookup.service",      "[Unit]\nBefore=nss-user-lookup.target\n[Service]\nUser=sssd\nExecStart=/bin/true\n" },
 
-        { "listen.socket",       "[Unit]\nAfter=network.target\n[Socket]\nListenStream=192.0.2.1:22\n" },
-        { "listen.service",      "[Service]\nExecStart=/bin/true\n" },
+        { "ip.socket",           "[Socket]\nListenStream=192.0.2.1:22\nService=sshd.service\n" },
+        { "ip6.socket",          "[Socket]\nListenStream=[2001:db8::1]:22\nListenStream=/run/ip6.sock\nService=sshd.service\n" },
+        { "wildcard.socket",     "[Socket]\nListenStream=22\nService=sshd.service\n" },
+        { "loopback.socket",     "[Socket]\nListenStream=127.0.0.1:22\nListenStream=[::1]:22\nService=sshd.service\n" },
+        { "unix.socket",         "[Socket]\nListenStream=/run/unix.sock\nService=sshd.service\n" },
+        { "early.socket",        "[Unit]\nBefore=sockets.target\n[Socket]\nListenStream=192.0.2.1:23\nService=sshd.service\n" },
+        { "sshd.service",        "[Service]\nExecStart=/bin/true\n" },
 };
 
 typedef struct Defaults {
@@ -85,7 +98,30 @@ static void test_one(const char *unit_dir, const Defaults *d) {
         ASSERT_FALSE(after(m, "local.service", SPECIAL_NETWORK_ONLINE_TARGET));
         ASSERT_FALSE(after(m, "wait-online.service", SPECIAL_NETWORK_ONLINE_TARGET));
         ASSERT_FALSE(after(m, "early.service", SPECIAL_NETWORK_ONLINE_TARGET));
-        ASSERT_FALSE(after(m, "listen.socket", SPECIAL_NETWORK_ONLINE_TARGET));
+
+        FOREACH_STRING(name, "ip.socket", "ip6.socket") {
+                /* Without IPv6 support in the kernel IPv6 addresses are ignored, and only the AF_UNIX
+                 * socket of ip6.socket remains. */
+                if (streq(name, "ip6.socket") && !socket_ipv6_is_supported())
+                        continue;
+
+                ASSERT_EQ(after(m, name, SPECIAL_NETWORK_ONLINE_TARGET), d->wait_network_online);
+                ASSERT_EQ(wants(m, name, SPECIAL_NETWORK_ONLINE_TARGET), d->wait_network_online);
+                ASSERT_EQ(after(m, name, SPECIAL_SOCKETS_TARGET), d->wait_network_online);
+                ASSERT_EQ(after(m, SPECIAL_SOCKETS_TARGET, name), !d->wait_network_online);
+        }
+        FOREACH_STRING(name, "wildcard.socket", "loopback.socket", "unix.socket", "early.socket") {
+                ASSERT_FALSE(after(m, name, SPECIAL_NETWORK_ONLINE_TARGET));
+                ASSERT_FALSE(after(m, name, SPECIAL_SOCKETS_TARGET));
+        }
+
+        /* Starting the boot sequence must not require breaking an ordering cycle, i.e. every job must
+         * survive. */
+        Job *j = NULL;
+        ASSERT_OK(manager_add_job(m, JOB_START, load(m, "boot.target"), JOB_REPLACE, /* reterr_error= */ NULL, &j));
+        FOREACH_STRING(name, SPECIAL_BASIC_TARGET, SPECIAL_SOCKETS_TARGET, "ip.socket", "wildcard.socket",
+                       "netmgr.service", SPECIAL_NETWORK_ONLINE_TARGET)
+                ASSERT_NOT_NULL(load(m, name)->job);
 
         ASSERT_EQ(after(m, "ldap-user.service", SPECIAL_NSS_USER_LOOKUP_TARGET), d->wait_user_lookup);
         ASSERT_EQ(after(m, "ldap-group.service", SPECIAL_NSS_USER_LOOKUP_TARGET), d->wait_user_lookup);

@@ -241,15 +241,16 @@ With `DefaultWaitNetworkOnline=yes`, every service with default dependencies
 that is ordered after `network.target` also pulls in and is ordered after
 `network-online.target`. Services that are part of reaching
 `network-online.target` themselves (i.e. are ordered before it) are not
-changed. With `DefaultWaitUserLookup=yes`, services running under a user or
+changed. Socket units that listen on a specific IP address (not a wildcard or
+loopback address) also pull in and are ordered after `network-online.target`,
+and are ordered after `sockets.target` instead of before it. With `DefaultWaitUserLookup=yes`, services running under a user or
 group specified by name are also ordered after `nss-user-lookup.target`, so
 that accounts provided by LDAP or similar directory services can be resolved
 when they start.
 
-`DefaultWaitNetworkOnline=yes` delays the affected services until the network is
+`DefaultWaitNetworkOnline=yes` delays the affected units until the network is
 online, and does not help with services that are not ordered after
-`network.target` at all. Socket units are started early during boot, and hence
-cannot be ordered after `network-online.target`, use `FreeBind=` for them.
+`network.target` at all.
 
 ## Modifying the meaning of `network-online.target`
 

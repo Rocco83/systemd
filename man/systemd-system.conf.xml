@@ -813,13 +813,19 @@ DefaultWaitUserLookup=yes</programlisting>
         <varname>Wants=</varname> and <varname>After=</varname> dependencies on
         <filename>network-online.target</filename>. Services that are themselves ordered before
         <filename>network-online.target</filename>, such as the various
-        <filename>*-wait-online.service</filename> units, are not changed. Socket units are not changed either,
-        as they are started before the network is configured, use <varname>FreeBind=</varname> in
-        <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-        for them instead.</para>
+        <filename>*-wait-online.service</filename> units, are not changed.</para>
 
-        <para>Note that this delays the start of the affected services until the network is considered
-        online. Defaults to off. This setting is only used by the system manager.</para>
+        <para>Similarly, every socket unit that has default dependencies enabled and listens on a specific
+        IPv4 or IPv6 address (i.e. not on a wildcard or loopback address, see <varname>ListenStream=</varname>
+        in <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>)
+        gets <varname>Wants=</varname> and <varname>After=</varname> dependencies on
+        <filename>network-online.target</filename>, and is ordered after <filename>sockets.target</filename>
+        instead of before it. Socket units listening on wildcard or loopback addresses, or on non-IP sockets,
+        are not changed, nor are socket units that are explicitly ordered before
+        <filename>sockets.target</filename> or <filename>network-online.target</filename>.</para>
+
+        <para>Note that this delays the start of the affected units until the network is considered online.
+        Defaults to off. This setting is only used by the system manager.</para>
 
         <xi:include href="version-info.xml" xpointer="v263"/></listitem>
       </varlistentry>
